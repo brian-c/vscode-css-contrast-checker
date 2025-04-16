@@ -1,0 +1,42 @@
+{
+	"name": "css-contrast-hints",
+	"displayName": "CSS Contrast Hints",
+	"description": "Flag inaccessible color contrast in CSS files",
+	"version": "0.0.1",
+	"author": "Brian Carstensen <brian@carstensen.dev>",
+	"engines": {
+		"vscode": "^1.99.0"
+	},
+	"categories": [
+		"Other"
+	],
+	"activationEvents": [
+		"onLanguage:css"
+	],
+	"main": "./out/extension.js",
+	"scripts": {
+		"vscode:prepublish": "npm run compile",
+		"compile": "tsc --project ./",
+		"watch": "tsc --watch --project ./",
+		"lint": "eslint src"
+	},
+	"dependencies": {
+		"colorjs.io": "^0.5.2",
+		"css-shorthand-parser": "^0.3.9",
+		"postcss": "^8.5.3"
+	},
+	"devDependencies": {
+		"@stylistic/eslint-plugin": "^4.2.0",
+		"@tsconfig/node-ts": "^23.6.1",
+		"@tsconfig/node22": "^22.0.1",
+		"@tsconfig/strictest": "^2.0.5",
+		"@types/node": "^22.14.1",
+		"@types/vscode": "^1.99.1",
+		"@typescript-eslint/eslint-plugin": "^8.29.1",
+		"@typescript-eslint/parser": "^8.29.1",
+		"eslint": "^9.24.0",
+		"eslint-plugin-only-warn": "^1.1.0",
+		"typescript": "^5.8.3",
+		"typescript-eslint": "^8.29.1"
+	}
+}
