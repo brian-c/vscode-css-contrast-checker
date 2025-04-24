@@ -45,23 +45,25 @@ class CssColorContrast {
 		this.#disposable.dispose();
 	}
 
-	async updateDecorations() {
-		this.#rootRuleWatcher.rules.map(rule => rule.walkDecls((d) => {
-			if (d.prop.startsWith('--')) console.log(d.prop, d.value);
-		}));
+	get minimumContrast() {
+		const setting = vscode.workspace.getConfiguration('cssContrastHints').get<'aa' | 'aaa' | number>('minimumContrast');
+		const value = setting === 'aa' ? 4.5 : setting === 'aaa' ? 7 : setting ?? NaN;
+		return { setting, value } as const;
+	}
 
+	async updateDecorations() {
 		const editor = vscode.window.activeTextEditor;
 		if (!editor || editor.document.languageId !== 'css') return;
 
 		const text = editor.document.getText();
-		const colorDeclarations = extractColorDeclarations(text, this.#rootRuleWatcher.rules);
+		const colorDeclarations = await extractColorDeclarations(text, this.#rootRuleWatcher.rules);
 
 		const decorations = colorDeclarations.map(({ declaration, color, background }) => {
 			if (!color || !background) return;
 			const foreground = new Color(color);
 			const flattened = foreground.mix(background, 1 - foreground.alpha);
 			const contrast = flattened.contrast(background, 'WCAG21');
-			const passes = contrast >= 4.5;
+			const passes = contrast >= this.minimumContrast.value;
 
 			const matchStart = declaration.source?.start?.offset;
 			const matchEnd = declaration.source?.end?.offset;
@@ -95,11 +97,12 @@ class CssColorContrast {
 		contrast: number,
 		passes: boolean,
 	) {
+		const wcag = this.minimumContrast.setting === 'aa' ? 'WCAG AA' : this.minimumContrast.setting === 'aaa' ? 'WCAG AAA' : null;
 		const message = new vscode.MarkdownString([
 			`\`${color}\` : \`${background}\` → ${parseFloat(contrast.toFixed(2)).toLocaleString()}:1`,
 			// Whitespace and order matter on this style string:
 			`<span style="color:${color};background-color:${background};">&nbsp;For example, lorem ipsum dolor sit amet&nbsp;</span>`,
-			`<small>${passes ? '✅ Meets' : '❌ Fails'} WCAG AA (minimum 4.5:1)</small>`,
+			`<small>${passes ? '✅ Meets' : '❌ Fails'} ${wcag ? `${wcag} (minimum ${this.minimumContrast.value}:1)` : `minimum ${this.minimumContrast.value}:1`}</small>`,
 		].join('  \n'));
 		message.supportHtml = true;
 		return message;

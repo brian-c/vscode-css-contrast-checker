@@ -4,6 +4,8 @@
 	"description": "Flag inaccessible color contrast in CSS files",
 	"version": "0.0.1",
 	"author": "Brian Carstensen <brian@carstensen.dev>",
+	"publisher": "brian-c",
+	"repository": "TODO: Respository",
 	"engines": {
 		"vscode": "^1.99.0"
 	},
@@ -13,17 +15,48 @@
 	"activationEvents": [
 		"onLanguage:css"
 	],
+	"files": [
+		"out/*",
+		"LICENSE.txt"
+	],
 	"main": "./out/extension.js",
+	"contributes": {
+		"configuration": {
+			"title": "CSS Contrast Hints",
+			"properties": {
+				"cssContrastHints.minimumContrast": {
+					"description": "Minimum acceptable contrast",
+					"oneOf": [
+						{
+							"type": "string",
+							"enum": ["aa", "aaa"],
+							"markdownEnumDescriptions": [
+								"WCAG AA",
+								"WCAG AAA"
+							]
+						},
+						{
+							"type": "number",
+							"description": "Any numeric value"
+						}
+					],
+					"default": "aa"
+				}
+			}
+		}
+	},
 	"scripts": {
 		"vscode:prepublish": "npm run compile",
-		"compile": "tsc --project ./",
-		"watch": "tsc --watch --project ./",
+		"compile": "node --experimental-strip-types ./scripts/bundle.mts",
+		"build": "vsce package",
 		"lint": "eslint src"
 	},
 	"dependencies": {
+		"@csstools/postcss-color-mix-function": "^3.0.8",
 		"colorjs.io": "^0.5.2",
 		"css-shorthand-parser": "^0.3.9",
-		"postcss": "^8.5.3"
+		"postcss": "^8.5.3",
+		"string-replace-async": "^3.0.2"
 	},
 	"devDependencies": {
 		"@stylistic/eslint-plugin": "^4.2.0",
@@ -34,6 +67,8 @@
 		"@types/vscode": "^1.99.1",
 		"@typescript-eslint/eslint-plugin": "^8.29.1",
 		"@typescript-eslint/parser": "^8.29.1",
+		"@vscode/vsce": "^3.3.2",
+		"esbuild": "^0.25.2",
 		"eslint": "^9.24.0",
 		"eslint-plugin-only-warn": "^1.1.0",
 		"typescript": "^5.8.3",

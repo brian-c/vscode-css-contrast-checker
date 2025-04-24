@@ -1,12 +1,14 @@
+import postcssColorMix from '@csstools/postcss-color-mix-function';
 import Color from 'colorjs.io';
-import postcss from 'postcss';
 import shorthandParser from 'css-shorthand-parser';
+import postcss from 'postcss';
 
 const COMMENT_PATTERN = /@bg\s*(.+)/i;
-const VAR_PATTERN = /var[(]\s*(.+)\s*[)]/i;
+const VAR_PATTERN = /var\(\s*(.+)\s*\)/i;
 const VAR_VALUES_PATTERN = /([^,]+),?(.*)*/;
+const BACKGROUND_PROPERTY_PATTERN = /^background(-color)?$/i;
 
-export function extractColorDeclarations(cssText: string, rootRules: postcss.Rule[]) {
+export async function extractColorDeclarations(cssText: string, rootRules: postcss.Rule[]) {
 	try {
 		const cssRoot = postcss.parse(cssText);
 
@@ -26,34 +28,33 @@ export function extractColorDeclarations(cssText: string, rootRules: postcss.Rul
 			}
 		});
 
-		const localRootRules: postcss.Rule[] = [];
+		const fileRootRules: postcss.Rule[] = [];
 		const colors: postcss.Declaration[] = [];
 
 		cssRoot.walkRules((rule) => {
 			if (rule.selector === ':root') {
-				localRootRules.push(rule);
+				fileRootRules.push(rule);
 			}
 
 			rule.walkDecls((declaration) => {
-				if (declaration.parent !== rule) return;
 				if (declaration.prop.toLowerCase() === 'color') {
 					colors.push(declaration);
 				}
 			});
 		});
 
-		const allRootRules = [...localRootRules, ...rootRules];
+		const allRootRules = [...fileRootRules, ...rootRules];
 
-		const colorMapEntries = colors.map((declaration) => {
+		const colorMapEntries = colors.map(async (declaration) => {
 			try {
-				const resolvedColorValue = resolveCustomProperty(declaration, allRootRules)?.value;
+				const resolvedColorValue = (await resolveColorDeclaration(declaration, allRootRules)).value;
 				const color = resolvedColorValue && new Color(resolvedColorValue).toString({ format: 'hex' });
 				let backgroundValue = commentBackgrounds.get(Number(declaration.source?.end?.line));
-				backgroundValue ??= getClosestBackground(declaration)?.value;
-				const parsed = shorthandParser('background', backgroundValue);
-				if (parsed['background-color']) backgroundValue = parsed['background-color'];
+				backgroundValue ??= getClosest(declaration, BACKGROUND_PROPERTY_PATTERN)?.value;
+				const parsed = backgroundValue && shorthandParser('background', backgroundValue);
+				if (parsed?.['background-color']) backgroundValue = parsed['background-color'];
 				const backgroundDeclaration = backgroundValue && declaration.clone({ value: backgroundValue });
-				const resolvedBackgroundValue = backgroundDeclaration && resolveCustomProperty(backgroundDeclaration, localRootRules)?.value;
+				const resolvedBackgroundValue = backgroundDeclaration && (await resolveColorDeclaration(backgroundDeclaration, allRootRules)).value;
 				const background = resolvedBackgroundValue && new Color(resolvedBackgroundValue).toString({ format: 'hex' });
 				if (!color || !background) return;
 				return { declaration, color, background } as const;
@@ -63,7 +64,7 @@ export function extractColorDeclarations(cssText: string, rootRules: postcss.Rul
 			}
 		});
 
-		return colorMapEntries.filter(entry => entry !== undefined);
+		return (await Promise.all(colorMapEntries)).filter(entry => entry !== undefined);
 	} catch (error) {
 		if (!(error instanceof postcss.CssSyntaxError)) throw error;
 	}
@@ -77,70 +78,65 @@ function isInvalidColorError(error: unknown) {
 		&& error.message.includes('as a color');
 }
 
-function resolveCustomProperty(
+async function resolveColorDeclaration(
 	declaration: postcss.Declaration,
 	rootRules: postcss.Rule[],
-) {
-	const varMatch = declaration.value.match(VAR_PATTERN);
-	const varValues = varMatch?.[1]?.match(VAR_VALUES_PATTERN);
+): Promise<postcss.Declaration> {
+	const isColorMix = declaration.value.startsWith('color-mix(');
+	if (isColorMix) {
+		const { default: replaceAsync } = await import('string-replace-async');
+		const newValue = await replaceAsync(declaration.value, VAR_PATTERN, async (varName) => {
+			const declarationClone = declaration.clone({ value: `var(${varName})` });
+			return (await resolveColorDeclaration(declarationClone, rootRules))?.value ?? 'NOT_RESOLVABLE';
+		});
+		return declaration.clone({ value: await parseColorWithPostcss(newValue) });
+	}
 
+	const varValues = declaration.value.match(VAR_PATTERN)?.[1]?.match(VAR_VALUES_PATTERN);
 	if (varValues) {
-		const [name, fallback] = varValues.slice(1, 3);
+		const [varName, fallback] = varValues.slice(1, 3);
+		if (!varName) return declaration;
 
-		if (!name) return;
-
-		let rule = getClosestRule(declaration);
-		let value: postcss.Declaration | undefined;
-
-		while (rule && !value) {
-			value = getRuleDeclaration(rule, name);
-			rule = rule.parent && getClosestRule(rule.parent);
-		}
-
+		let value = getClosest(declaration, varName);
 		if (!value) {
 			for (const rule of rootRules) {
-				value ??= getRuleDeclaration(rule, name);
+				value ??= getLastDeclaration(rule, varName);
 			}
 		}
 
 		if (value) {
-			return value;
+			return resolveColorDeclaration(value, rootRules);
 		} else if (fallback) {
 			const fallbackDeclaration = declaration.clone({ value: fallback });
-			return resolveCustomProperty(fallbackDeclaration, rootRules);
+			return resolveColorDeclaration(fallbackDeclaration, rootRules);
 		}
-	} else {
-		return declaration;
 	}
 
-	return;
+	return declaration;
 }
 
-function getClosestBackground(node: postcss.Node) {
-	let rule = getClosestRule(node);
-	let background: postcss.Declaration | undefined;
-	while (rule && !background) {
-		background = getRuleDeclaration(rule, /^background(-color)?$/);
-		rule = rule.parent && getClosestRule(rule.parent);
+function getClosest(node: postcss.Node, property: RegExp | string) {
+	let parent = node.parent;
+	let result: postcss.Declaration | undefined;
+	while (parent && !result) {
+		const parentIsNotADocument = parent.parent;
+		if (parentIsNotADocument) result = getLastDeclaration(parent, property);
+		parent = parent.parent;
 	}
-	return background;
+	return result;
 }
 
-function getClosestRule(node: postcss.Node) {
-	let parent: postcss.Node | undefined = node;
-	while (parent && parent.type !== 'rule') {
-		parent = node.parent;
-	}
-	return parent as postcss.Rule | undefined;
-}
-
-function getRuleDeclaration(rule: postcss.Rule, property: RegExp | string) {
+function getLastDeclaration(rule: postcss.Container, property: RegExp | string) {
 	let result: postcss.Declaration | undefined;
 	rule.walkDecls(property, (declaration) => {
-		if (declaration.parent === rule) {
-			// Don't `return false` to break; we want the last one.
-			result = declaration;
-		}
+		if (declaration.parent === rule) result = declaration;
 	});
 	return result;
+}
+
+const postcssWithColorMix = postcss([postcssColorMix()]);
+async function parseColorWithPostcss(color: string) {
+	const wrap = ['span{color:', ';}'] as const;
+	const result = await postcssWithColorMix.process(`${wrap[0]}${color}${wrap[1]}`, { from: undefined });
+	return result.css.slice(wrap[0].length, wrap[1].length * -1);
 }
